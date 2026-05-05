@@ -18,6 +18,30 @@
             font-size: 2.5rem;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
         }
+        .upload-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 2px dashed var(--primary-color, #ff85a2);
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.3);
+            transition: 0.3s;
+            cursor: pointer;
+        }
+        .upload-section:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+        .upload-label {
+            cursor: pointer;
+            color: var(--primary-color, #ff85a2);
+            font-weight: bold;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        #music-upload {
+            display: none;
+        }
         .music-player-section {
             background: var(--glass-bg);
             backdrop-filter: blur(15px);
@@ -98,14 +122,21 @@
         <p>Master，请选择您想聆听的旋律：</p>
 
         <section class="music-player-section">
-            <h2>精选曲目</h2>
-            <div class="music-selection">
-                <a href="#" class="music-item-btn" data-src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" data-name="恋爱循环 - 花泽香菜">
-                    🌸 恋爱循环 - 花泽香菜
-                </a>
-                <a href="#" class="music-item-btn" data-src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3" data-name="Lemon - 米津玄师">
-                    🍋 Lemon - 米津玄师
-                </a>
+            <div class="upload-section" onclick="document.getElementById('music-upload').click()">
+                <label class="upload-label">
+                    <i class="fas fa-cloud-upload-alt fa-2x"></i>
+                    <span>点击上传您的音乐 (MP3/WAV)</span>
+                </label>
+                <input type="file" id="music-upload" accept="audio/*" multiple>
+            </div>
+
+            <h2>我的音乐库</h2>
+            <div class="music-selection" id="music-list">
+                <div class="music-item-wrapper">
+                    <a href="#" class="music-item-btn" data-src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" data-name="恋爱循环 (示例)">
+                        🌸 恋爱循环 - 示例曲目
+                    </a>
+                </div>
             </div>
             <div id="audio-player-container">
                 <!-- Audio player will be loaded here -->
@@ -123,23 +154,90 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const musicItems = document.querySelectorAll('.music-item-btn');
             const audioPlayerContainer = document.getElementById('audio-player-container');
+            const musicUpload = document.getElementById('music-upload');
+            const musicList = document.getElementById('music-list');
+            const STORAGE_KEY = 'moedash_music_data';
 
-            musicItems.forEach(item => {
-                item.addEventListener('click', (e) => {
-                    e.preventDefault(); // Prevent default link behavior
-                    const musicSrc = item.dataset.src;
-                    const musicName = item.dataset.name;
-
-                    audioPlayerContainer.innerHTML = `
-                        <p style="font-size: 0.9rem; margin-bottom: 10px; color: var(--text-color);">正在播放: ${musicName}</p>
-                        <audio controls autoplay>
-                            <source src="${musicSrc}" type="audio/mpeg">
-                            您的浏览器不支持音频播放。
-                        </audio>
-                    `;
+            // 1. 加载保存的音乐
+            const loadSavedMusic = () => {
+                const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+                // 保留第一个默认曲目，清空其余动态生成的曲目
+                const wrappers = musicList.querySelectorAll('.music-item-wrapper');
+                for(let i = 1; i < wrappers.length; i++) wrappers[i].remove();
+                
+                saved.forEach((music, index) => {
+                    renderMusicItem(music.name, music.src, music.date, index);
                 });
+            };
+
+            const renderMusicItem = (name, src, date, index) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'music-item-wrapper';
+                wrapper.innerHTML = `
+                    <a href="#" class="music-item-btn" data-src="${src}" data-name="${name}">
+                        🎵 ${name.split('.')[0]}
+                        <span class="upload-date">上传于: ${date}</span>
+                    </a>
+                    <button class="delete-btn" onclick="deleteMusic(${index})"><i class="fas fa-trash"></i></button>
+                `;
+                musicList.appendChild(wrapper);
+            };
+
+            // 删除音乐逻辑
+            window.deleteMusic = (index) => {
+                let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+                saved.splice(index, 1);
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+                loadSavedMusic();
+            };
+
+            loadSavedMusic();
+
+            // 2. 上传逻辑
+            musicUpload.addEventListener('change', (e) => {
+                const files = e.target.files;
+                let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+
+                Array.from(files).forEach(file => {
+                    if (file.type.startsWith('audio/')) {
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            const musicData = {
+                                name: file.name,
+                                src: event.target.result,
+                                date: new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                            };
+                            saved.push(musicData);
+                            try {
+                                localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+                                loadSavedMusic();
+                            } catch (err) {
+                                alert('Master，存储空间满了！音频文件较大，请删除一些旧歌曲再试。');
+                            }
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                });
+                musicUpload.value = '';
+            });
+
+            // 3. 播放逻辑 (使用事件委托支持动态添加的内容)
+            musicList.addEventListener('click', (e) => {
+                const btn = e.target.closest('.music-item-btn');
+                if (!btn) return;
+                
+                e.preventDefault();
+                const musicSrc = btn.dataset.src;
+                const musicName = btn.dataset.name;
+
+                audioPlayerContainer.innerHTML = `
+                    <p style="font-size: 0.9rem; margin-bottom: 10px; color: var(--text-color);">正在播放: ${musicName}</p>
+                    <audio controls autoplay>
+                        <source src="${musicSrc}" type="audio/mpeg">
+                        您的浏览器不支持音频播放。
+                    </audio>
+                `;
             });
         });
     </script>
