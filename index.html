@@ -6,6 +6,62 @@
     <title>Moe Dash - 二次元应用控制台</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        /* 登录弹窗样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            backdrop-filter: blur(5px);
+        }
+        .modal-content {
+            background: var(--glass-bg, rgba(255, 255, 255, 0.9));
+            margin: 10% auto;
+            padding: 2rem;
+            border-radius: 20px;
+            width: 350px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            border: 2px solid var(--primary-color, #ff85a2);
+        }
+        .modal-content h2 { color: var(--primary-color, #ff85a2); margin-bottom: 1.5rem; }
+        .input-group { margin-bottom: 1rem; text-align: left; }
+        .input-group label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: #666; }
+        .input-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .login-btn {
+            background: var(--primary-color, #ff85a2);
+            color: white;
+            border: none;
+            padding: 10px 30px;
+            border-radius: 20px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 1rem;
+            margin-top: 10px;
+            transition: 0.3s;
+        }
+        .login-btn:hover { opacity: 0.9; transform: scale(1.02); }
+        .close-modal {
+            float: right;
+            cursor: pointer;
+            font-size: 1.5rem;
+            color: #999;
+        }
+        #user-display {
+            font-weight: bold;
+            color: var(--primary-color, #ff85a2);
+        }
+    </style>
 </head>
 <body>
     <div class="background-overlay"></div>
@@ -15,21 +71,21 @@
         <ul class="nav-links">
             <li><a href="#"><i class="fas fa-home"></i> 首页</a></li>
             <li><a href="#"><i class="fas fa-heart"></i> 收藏</a></li>
-            <li><a href="#"><i class="fas fa-user"></i> 个人中心</a></li>
+            <li><a href="#" id="login-trigger"><i class="fas fa-user"></i> <span id="nav-user-text">个人中心</span></a></li>
         </ul>
     </nav>
 
     <main class="container">
         <header class="hero">
-            <h1>欢迎回来，Master!</h1>
-            <p>今天也要充满元气地敲代码哦 (｡♥‿♥｡)</p>
+            <h1 id="welcome-title">欢迎回来，Master!</h1>
+            <p>今天依旧是幸福的一天 (｡♥‿♥｡)</p>
         </header>
 
         <section class="card-grid">
             <div class="card clickable">
-                <div class="card-icon"><i class="fas fa-code"></i></div>
-                <h3>代码实验室</h3>
-                <p>探索最前沿的技术魔法</p>
+                <div class="card-icon"><i class="fas fa-star"></i></div>
+                <h3>灵感核心</h3>
+                <p>链接你的创作宇宙</p>
             </div>
             <div class="card clickable">
                 <div class="card-icon"><i class="fas fa-palette"></i></div>
@@ -48,6 +104,29 @@
             </div>
         </section>
     </main>
+
+    <!-- 登录弹窗 -->
+    <div id="login-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h2 id="modal-title">Master 登入</h2>
+            <div class="input-group">
+                <label>账号 (3-20位纯英文)</label>
+                <input type="text" id="username" placeholder="请输入账号">
+            </div>
+            <div class="input-group">
+                <label>密码 (6-12位数字与字母组合)</label>
+                <input type="password" id="password" placeholder="请输入密码">
+            </div>
+            <button class="login-btn" id="submit-login">确认进入魔法世界</button>
+            <p style="margin-top: 15px; font-size: 0.9rem;">
+                <a href="#" id="toggle-mode" style="color: var(--primary-color); text-decoration: none;">还没有账号？点击注册</a>
+            </p>
+            <p style="font-size: 0.8rem; margin-top: 15px; color: #888;">
+                * 账户数据保存在本地浏览器
+            </p>
+        </div>
+    </div>
 
     <footer class="footer">
         <p>&copy; 2024 MoeDash | Crafted with ❤️ for Weebs</p>
@@ -74,7 +153,121 @@
             setTimeout(() => effect.remove(), 1000);
         });
 
-        // 2. 增强版卡片点击交互
+        // 2. 账号系统逻辑
+        const USER_DB_NAME = 'MoeDashUserDB';
+        const USER_STORE_NAME = 'users';
+
+        // 初始化用户数据库
+        const initUserDB = () => {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(USER_DB_NAME, 1);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(USER_STORE_NAME)) {
+                        db.createObjectStore(USER_STORE_NAME, { keyPath: 'username' });
+                    }
+                };
+                request.onsuccess = (e) => resolve(e.target.result);
+                request.onerror = (e) => reject(e.target.error);
+            });
+        };
+
+        const loginModal = document.getElementById('login-modal');
+        const loginTrigger = document.getElementById('login-trigger');
+        const closeModal = document.querySelector('.close-modal');
+        const submitLogin = document.getElementById('submit-login');
+        const toggleMode = document.getElementById('toggle-mode');
+        const modalTitle = document.getElementById('modal-title');
+        const navUserText = document.getElementById('nav-user-text');
+        const welcomeTitle = document.getElementById('welcome-title');
+
+        let isRegisterMode = false;
+
+        // 切换登录/注册模式
+        toggleMode.addEventListener('click', (e) => {
+            e.preventDefault();
+            isRegisterMode = !isRegisterMode;
+            modalTitle.innerText = isRegisterMode ? 'Master 注册' : 'Master 登入';
+            submitLogin.innerText = isRegisterMode ? '创建魔法契约' : '确认进入魔法世界';
+            toggleMode.innerText = isRegisterMode ? '已有账号？点击登录' : '还没有账号？点击注册';
+        });
+
+        const checkLoginStatus = () => {
+            const user = localStorage.getItem('moedash_user');
+            if (user) {
+                navUserText.innerText = user;
+                welcomeTitle.innerText = `欢迎回来，${user} Master!`;
+            }
+        };
+        checkLoginStatus();
+
+        loginTrigger.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (localStorage.getItem('moedash_user')) {
+                if (confirm('Master，要退出当前账号吗？')) {
+                    localStorage.removeItem('moedash_user');
+                    location.reload();
+                }
+            } else {
+                loginModal.style.display = 'block';
+            }
+        });
+
+        closeModal.onclick = () => loginModal.style.display = 'none';
+        window.onclick = (e) => { if (e.target == loginModal) loginModal.style.display = 'none'; };
+
+        submitLogin.onclick = async () => {
+            const user = document.getElementById('username').value.trim();
+            const pass = document.getElementById('password').value.trim();
+            
+            // 验证规则：3-20位纯英文
+            const userRegex = /^[a-zA-Z]{3,20}$/;
+            // 验证规则：6-12位数字和字母
+            const passRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{6,12}$/;
+
+            if (!userRegex.test(user)) {
+                alert('Master，账号要求3-20个字符且只能是英文哦！');
+                return;
+            }
+            if (!passRegex.test(pass)) {
+                alert('Master，密码要求6-12位，且必须包含数字和字母呢！');
+                return;
+            }
+
+            const db = await initUserDB();
+            const transaction = db.transaction(USER_STORE_NAME, 'readwrite');
+            const store = transaction.objectStore(USER_STORE_NAME);
+
+            if (isRegisterMode) {
+                // 注册逻辑
+                const checkRequest = store.get(user);
+                checkRequest.onsuccess = () => {
+                    if (checkRequest.result) {
+                        alert('Master，这个账号已经存在了哦，换一个吧！');
+                    } else {
+                        store.add({ username: user, password: pass });
+                        alert('(๑>◡<๑) 注册成功！现在您可以登录了。');
+                        toggleMode.click(); // 自动切换回登录界面
+                    }
+                };
+            } else {
+                // 登录逻辑
+                const getRequest = store.get(user);
+                getRequest.onsuccess = () => {
+                    const userData = getRequest.result;
+                    if (userData && userData.password === pass) {
+                        localStorage.setItem('moedash_user', user);
+                        alert(`(๑>◡<๑) 欢迎您，${user} Master！`);
+                        loginModal.style.display = 'none';
+                        checkLoginStatus();
+                    } else {
+                        alert('Master，账号不存在或密码错误呢，请检查一下~(´；д；`)');
+                    }
+                };
+            }
+        };
+
+        // 3. 增强版卡片点击交互
         document.querySelectorAll('.card').forEach(card => {
             card.addEventListener('click', (e) => {
                 const title = card.querySelector('h3').textContent.trim();

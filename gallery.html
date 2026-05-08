@@ -185,23 +185,45 @@
         // 2. 图片上传与预览功能
         const imageUpload = document.getElementById('image-upload');
         const imageGrid = document.getElementById('image-grid');
-        const STORAGE_KEY = 'moedash_gallery_images';
+        const DB_NAME = 'MoeDashGalleryDB';
+        const STORE_NAME = 'images';
 
-        // 初始化：加载本地保存的图片
-        const loadSavedImages = () => {
-            const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-            imageGrid.innerHTML = ''; // 清空当前网格
-            saved.forEach((imgData, index) => { // 传递 uploadDate
-                renderGalleryItem(imgData.name, imgData.src, imgData.uploadDate, index);
+        // 使用 IndexedDB 解决 localStorage 5MB 限制问题
+        const initDB = () => {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, 1);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+                    }
+                };
+                request.onsuccess = (e) => resolve(e.target.result);
+                request.onerror = (e) => reject(e.target.error);
             });
         };
 
+        // 初始化：加载本地保存的图片
+        const loadSavedImages = async () => {
+            const db = await initDB();
+            const transaction = db.transaction(STORE_NAME, 'readonly');
+            const store = transaction.objectStore(STORE_NAME);
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                imageGrid.innerHTML = '';
+                request.result.forEach((imgData) => {
+                    renderGalleryItem(imgData.name, imgData.src, imgData.uploadDate, imgData.id);
+                });
+            };
+        };
+
         // 渲染单个图片卡片
-        const renderGalleryItem = (name, src, uploadDate, index) => { // 接收 uploadDate
+        const renderGalleryItem = (name, src, uploadDate, id) => { 
             const galleryItem = document.createElement('div');
             galleryItem.className = 'gallery-item';
             galleryItem.innerHTML = `
-                <button class="delete-btn" onclick="deleteImage(${index})"><i class="fas fa-trash"></i></button>
+                <button class="delete-btn" onclick="deleteImage(${id})"><i class="fas fa-trash"></i></button>
                 <img src="${src}" alt="${name}">
                 <div class="img-info">
                     <h4>${name.split('.')[0]}</h4>
@@ -212,37 +234,40 @@
         };
 
         // 删除图片逻辑
-        window.deleteImage = (index) => {
-            let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-            saved.splice(index, 1);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-            loadSavedImages(); // 重新渲染
+        window.deleteImage = async (id) => {
+            const db = await initDB();
+            const transaction = db.transaction(STORE_NAME, 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+            store.delete(id);
+            transaction.oncomplete = () => {
+                loadSavedImages();
+            };
         };
 
         // 执行初始加载
         loadSavedImages();
 
-        imageUpload.addEventListener('change', (e) => {
+        imageUpload.addEventListener('change', async (e) => {
             const files = e.target.files;
-            let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            const db = await initDB();
             
             Array.from(files).forEach(file => {
                 if (file.type.startsWith('image/')) {
                     const reader = new FileReader();
                     
-                    reader.onload = (event) => {
+                    reader.onload = async (event) => {
                         const newImg = { 
                             name: file.name, 
                             src: event.target.result,
                             uploadDate: new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) // 记录上传日期
                         };
-                        saved.push(newImg);
-                        try {
-                            localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-                            loadSavedImages(); // 重新加载以显示新图片和日期
-                        } catch (err) {
-                            alert('Master，存储空间满了！建议删除一些旧图片再上传哦~');
-                        }
+                        
+                        const transaction = db.transaction(STORE_NAME, 'readwrite');
+                        const store = transaction.objectStore(STORE_NAME);
+                        store.add(newImg);
+                        transaction.oncomplete = () => {
+                            loadSavedImages();
+                        };
                     };
                     
                     reader.readAsDataURL(file);

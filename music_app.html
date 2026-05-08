@@ -157,21 +157,41 @@
             const audioPlayerContainer = document.getElementById('audio-player-container');
             const musicUpload = document.getElementById('music-upload');
             const musicList = document.getElementById('music-list');
-            const STORAGE_KEY = 'moedash_music_data';
+            const DB_NAME = 'MoeDashMusicDB';
+            const STORE_NAME = 'songs';
 
-            // 1. 加载保存的音乐
-            const loadSavedMusic = () => {
-                const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-                // 保留第一个默认曲目，清空其余动态生成的曲目
-                const wrappers = musicList.querySelectorAll('.music-item-wrapper');
-                for(let i = 1; i < wrappers.length; i++) wrappers[i].remove();
-                
-                saved.forEach((music, index) => {
-                    renderMusicItem(music.name, music.src, music.date, index);
+            const initDB = () => {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open(DB_NAME, 1);
+                    request.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains(STORE_NAME)) {
+                            db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+                        }
+                    };
+                    request.onsuccess = (e) => resolve(e.target.result);
+                    request.onerror = (e) => reject(e.target.error);
                 });
             };
 
-            const renderMusicItem = (name, src, date, index) => {
+            // 1. 加载保存的音乐
+            const loadSavedMusic = async () => {
+                const db = await initDB();
+                const transaction = db.transaction(STORE_NAME, 'readonly');
+                const store = transaction.objectStore(STORE_NAME);
+                const request = store.getAll();
+
+                request.onsuccess = () => {
+                    const wrappers = musicList.querySelectorAll('.music-item-wrapper');
+                    for(let i = 1; i < wrappers.length; i++) wrappers[i].remove();
+                    
+                    request.result.forEach((music) => {
+                        renderMusicItem(music.name, music.src, music.date, music.id);
+                    });
+                };
+            };
+
+            const renderMusicItem = (name, src, date, id) => {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'music-item-wrapper';
                 wrapper.innerHTML = `
@@ -179,42 +199,40 @@
                         🎵 ${name.split('.')[0]}
                         <span class="upload-date">上传于: ${date}</span>
                     </a>
-                    <button class="delete-btn" onclick="deleteMusic(${index})"><i class="fas fa-trash"></i></button>
+                    <button class="delete-btn" onclick="deleteMusic(${id})"><i class="fas fa-trash"></i></button>
                 `;
                 musicList.appendChild(wrapper);
             };
 
             // 删除音乐逻辑
-            window.deleteMusic = (index) => {
-                let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-                saved.splice(index, 1);
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-                loadSavedMusic();
+            window.deleteMusic = async (id) => {
+                const db = await initDB();
+                const transaction = db.transaction(STORE_NAME, 'readwrite');
+                const store = transaction.objectStore(STORE_NAME);
+                store.delete(id);
+                transaction.oncomplete = () => loadSavedMusic();
             };
 
             loadSavedMusic();
 
             // 2. 上传逻辑
-            musicUpload.addEventListener('change', (e) => {
+            musicUpload.addEventListener('change', async (e) => {
                 const files = e.target.files;
-                let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+                const db = await initDB();
 
                 Array.from(files).forEach(file => {
                     if (file.type.startsWith('audio/')) {
                         const reader = new FileReader();
-                        reader.onload = (event) => {
+                        reader.onload = async (event) => {
                             const musicData = {
                                 name: file.name,
                                 src: event.target.result,
                                 date: new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
                             };
-                            saved.push(musicData);
-                            try {
-                                localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-                                loadSavedMusic();
-                            } catch (err) {
-                                alert('Master，存储空间满了！音频文件较大，请删除一些旧歌曲再试。');
-                            }
+                            const transaction = db.transaction(STORE_NAME, 'readwrite');
+                            const store = transaction.objectStore(STORE_NAME);
+                            store.add(musicData);
+                            transaction.oncomplete = () => loadSavedMusic();
                         };
                         reader.readAsDataURL(file);
                     }
